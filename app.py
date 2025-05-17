@@ -6,11 +6,13 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import plotly.express as px
+import json
 
 # === CONFIGURACIÓN DE ACCESO A GOOGLE SHEETS ===
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+creds_dict = json.loads(st.secrets["GOOGLE_SHEETS_CREDS"])
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(credentials)
 
 SHEET_ID = "1W0gOUZFFJHvsP5f6aozHDWt519WEy1u2q8h0nImVCt8"
