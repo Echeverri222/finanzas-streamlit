@@ -6,6 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import plotly.express as px
+import plotly.graph_objects as go
 import json
 
 # === CONFIGURACIÓN DE ACCESO A GOOGLE SHEETS ===
@@ -16,7 +17,10 @@ credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope
 client = gspread.authorize(credentials)
 
 SHEET_ID = "1W0gOUZFFJHvsP5f6aozHDWt519WEy1u2q8h0nImVCt8"
-sheet = client.open_by_key(SHEET_ID).sheet1
+workbook = client.open_by_key(SHEET_ID)
+sheet = workbook.sheet1
+sheet_ahorros = workbook.get_worksheet(1)  # Hoja 2 para ahorros
+sheet_metas = workbook.get_worksheet(2)    # Hoja 3 para metas
 
 # === FUNCIONES ===
 
@@ -29,6 +33,30 @@ def cargar_datos():
         df["fecha"] = pd.to_datetime(df["fecha"])
         df["mes"] = df["fecha"].dt.to_period("M").astype(str)
     return df
+
+def cargar_ahorros():
+    """Carga los datos de ahorros"""
+    try:
+        data = sheet_ahorros.get_all_records()
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df["fecha"] = pd.to_datetime(df["fecha"])
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar ahorros: {str(e)}")
+        return pd.DataFrame()
+
+def cargar_metas():
+    """Carga las metas de ahorro"""
+    try:
+        data = sheet_metas.get_all_records()
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df["fecha_meta"] = pd.to_datetime(df["fecha_meta"])
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar metas: {str(e)}")
+        return pd.DataFrame()
 
 def guardar_movimiento(fecha, nombre, importe, tipo):
     """Guarda un nuevo movimiento y retorna True si fue exitoso"""
@@ -43,6 +71,32 @@ def guardar_movimiento(fecha, nombre, importe, tipo):
         st.error(f"Error al guardar el movimiento: {str(e)}")
         return False
 
+def guardar_ahorro(fecha, monto, descripcion):
+    """Guarda un nuevo movimiento de ahorro"""
+    try:
+        fecha_str = fecha.strftime("%Y-%m-%d")
+        nueva_fila = [fecha_str, int(monto), descripcion]
+        next_row = len(sheet_ahorros.get_all_values()) + 1
+        sheet_ahorros.append_row(nueva_fila)
+        sheet_ahorros.format(f"A{next_row}", {"numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}})
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar el ahorro: {str(e)}")
+        return False
+
+def guardar_meta(nombre, meta_total, fecha_meta, descripcion):
+    """Guarda una nueva meta de ahorro"""
+    try:
+        fecha_str = fecha_meta.strftime("%Y-%m-%d")
+        nueva_fila = [nombre, int(meta_total), fecha_str, descripcion]
+        next_row = len(sheet_metas.get_all_values()) + 1
+        sheet_metas.append_row(nueva_fila)
+        sheet_metas.format(f"C{next_row}", {"numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}})
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar la meta: {str(e)}")
+        return False
+
 def eliminar_movimiento(indice_sheet):
     try:
         sheet.delete_rows(indice_sheet + 2)  # +2 porque sheets empieza en 1 y tiene header
@@ -52,8 +106,55 @@ def eliminar_movimiento(indice_sheet):
     except Exception as e:
         st.error(f"Error al eliminar el movimiento: {str(e)}")
 
+def eliminar_ahorro(indice_sheet):
+    try:
+        sheet_ahorros.delete_rows(indice_sheet + 2)
+        st.cache_data.clear()
+        st.success("✅ Ahorro eliminado correctamente.")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error al eliminar el ahorro: {str(e)}")
+
+def eliminar_meta(indice_sheet):
+    try:
+        sheet_metas.delete_rows(indice_sheet + 2)
+        st.cache_data.clear()
+        st.success("✅ Meta eliminada correctamente.")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error al eliminar la meta: {str(e)}")
+
+def actualizar_ahorro(indice_sheet, fecha, monto, descripcion):
+    """Actualiza un registro de ahorro existente"""
+    try:
+        fecha_str = fecha.strftime("%Y-%m-%d")
+        sheet_ahorros.update(f'A{indice_sheet + 2}', fecha_str)
+        sheet_ahorros.update(f'B{indice_sheet + 2}', int(monto))
+        sheet_ahorros.update(f'C{indice_sheet + 2}', descripcion)
+        sheet_ahorros.format(f"A{indice_sheet + 2}", {"numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}})
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar el ahorro: {str(e)}")
+        return False
+
+def actualizar_meta(indice_sheet, nombre, meta_total, fecha_meta, descripcion):
+    """Actualiza una meta existente"""
+    try:
+        fecha_str = fecha_meta.strftime("%Y-%m-%d")
+        sheet_metas.update(f'A{indice_sheet + 2}', nombre)
+        sheet_metas.update(f'B{indice_sheet + 2}', int(meta_total))
+        sheet_metas.update(f'C{indice_sheet + 2}', fecha_str)
+        sheet_metas.update(f'D{indice_sheet + 2}', descripcion)
+        sheet_metas.format(f"C{indice_sheet + 2}", {"numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}})
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar la meta: {str(e)}")
+        return False
+
 # Cargar datos al inicio
 df = cargar_datos()
+df_ahorros = cargar_ahorros()
+df_metas = cargar_metas()
 
 fmt = lambda x: f"${x:,.0f}".replace(",", ".")
 
@@ -83,9 +184,27 @@ if "confirmar_eliminar" not in st.session_state:
     st.session_state["confirmar_eliminar"] = False
 if "indice_eliminar" not in st.session_state:
     st.session_state["indice_eliminar"] = None
+if "mostrar_form_ahorro" not in st.session_state:
+    st.session_state["mostrar_form_ahorro"] = False
+if "mostrar_form_meta" not in st.session_state:
+    st.session_state["mostrar_form_meta"] = False
+if "editar_ahorro" not in st.session_state:
+    st.session_state["editar_ahorro"] = None
+if "editar_meta" not in st.session_state:
+    st.session_state["editar_meta"] = None
+if "confirmar_eliminar_ahorro" not in st.session_state:
+    st.session_state["confirmar_eliminar_ahorro"] = None
+if "confirmar_eliminar_meta" not in st.session_state:
+    st.session_state["confirmar_eliminar_meta"] = None
 
 # Crear pestañas
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Resumen Gráfico", "📝 Gestión de Movimientos", "📋 Detalle Mensual", "📜 Lista de Movimientos"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Resumen Gráfico",
+    "📝 Gestión de Movimientos",
+    "📋 Detalle Mensual",
+    "📜 Lista de Movimientos",
+    "💰 Ahorros y Metas"
+])
 
 with tab1:
     # === RESUMEN GRÁFICO ===
@@ -272,3 +391,243 @@ with tab4:
         },
         hide_index=True
     )
+
+with tab5:
+    # === AHORROS Y METAS ===
+    st.subheader("💰 Gestión de Ahorros y Metas")
+    
+    # Sección de Ahorros
+    st.markdown("### 📈 Ahorros")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("➕ Registrar Ahorro"):
+            st.session_state["mostrar_form_ahorro"] = True
+            st.session_state["editar_ahorro"] = None
+    
+    # Formulario para añadir/editar ahorro
+    if st.session_state["mostrar_form_ahorro"] or st.session_state["editar_ahorro"] is not None:
+        with st.form("formulario_ahorro"):
+            editar_modo = st.session_state["editar_ahorro"] is not None
+            if editar_modo:
+                ahorro = df_ahorros.iloc[st.session_state["editar_ahorro"]]
+                st.markdown("#### ✏️ Editar Ahorro")
+            else:
+                st.markdown("#### ➕ Nuevo Ahorro")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_ahorro = st.date_input(
+                    "Fecha",
+                    value=ahorro["fecha"].date() if editar_modo else datetime.today()
+                )
+                monto_ahorro = st.number_input(
+                    "Monto",
+                    value=int(ahorro["monto"]) if editar_modo else 0,
+                    step=1000,
+                    min_value=0
+                )
+            with col2:
+                descripcion_ahorro = st.text_input(
+                    "Descripción",
+                    value=ahorro["descripcion"] if editar_modo else ""
+                )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit = st.form_submit_button("💾 Guardar")
+            with col2:
+                cancel = st.form_submit_button("❌ Cancelar")
+            
+            if submit:
+                if editar_modo:
+                    if actualizar_ahorro(st.session_state["editar_ahorro"], fecha_ahorro, monto_ahorro, descripcion_ahorro):
+                        st.success("✅ Ahorro actualizado correctamente")
+                        st.session_state["editar_ahorro"] = None
+                        df_ahorros = cargar_ahorros()
+                        st.rerun()
+                else:
+                    if guardar_ahorro(fecha_ahorro, monto_ahorro, descripcion_ahorro):
+                        st.success("✅ Ahorro registrado correctamente")
+                        st.session_state["mostrar_form_ahorro"] = False
+                        df_ahorros = cargar_ahorros()
+                        st.rerun()
+            
+            if cancel:
+                st.session_state["mostrar_form_ahorro"] = False
+                st.session_state["editar_ahorro"] = None
+                st.rerun()
+    
+    # Mostrar resumen de ahorros
+    if not df_ahorros.empty:
+        total_ahorrado = df_ahorros["monto"].sum()
+        st.metric("Total Ahorrado", fmt(total_ahorrado))
+        
+        # Gráfico de evolución de ahorros
+        df_ahorros_evol = df_ahorros.sort_values("fecha").copy()
+        df_ahorros_evol["monto_acumulado"] = df_ahorros_evol["monto"].cumsum()
+        
+        fig_ahorros = px.line(
+            df_ahorros_evol,
+            x="fecha",
+            y="monto_acumulado",
+            title="Evolución de Ahorros (Acumulado)",
+            markers=True
+        )
+        fig_ahorros.update_layout(
+            yaxis_tickformat=",",
+            yaxis_tickprefix="$ ",
+            xaxis_title="Fecha",
+            yaxis_title="Total Ahorrado"
+        )
+        
+        # Añadir etiquetas con los montos en cada punto
+        fig_ahorros.update_traces(
+            texttemplate="%{y:$,.0f}",
+            textposition="top center"
+        )
+        
+        st.plotly_chart(fig_ahorros, use_container_width=True)
+        
+        # Lista de movimientos de ahorro
+        st.markdown("#### Movimientos de Ahorro")
+        for idx, ahorro in df_ahorros.sort_values("fecha", ascending=False).iterrows():
+            with st.container():
+                cols = st.columns([2, 2, 2, 1, 1])
+                cols[0].write(ahorro["fecha"].strftime("%Y-%m-%d"))
+                cols[1].write(fmt(ahorro["monto"]))
+                cols[2].write(ahorro["descripcion"])
+                
+                # Botones de editar y eliminar
+                if cols[3].button("✏️", key=f"edit_ahorro_{idx}"):
+                    st.session_state["editar_ahorro"] = idx
+                    st.session_state["mostrar_form_ahorro"] = False
+                    st.rerun()
+                
+                if cols[4].button("🗑️", key=f"del_ahorro_{idx}"):
+                    st.session_state["confirmar_eliminar_ahorro"] = idx
+                    st.rerun()
+                
+                # Confirmación de eliminación
+                if st.session_state["confirmar_eliminar_ahorro"] == idx:
+                    st.warning("⚠️ ¿Estás seguro de eliminar este ahorro?")
+                    col1, col2 = st.columns(2)
+                    if col1.button("✓ Sí", key=f"confirm_del_ahorro_{idx}"):
+                        eliminar_ahorro(idx)
+                        st.session_state["confirmar_eliminar_ahorro"] = None
+                        df_ahorros = cargar_ahorros()
+                        st.rerun()
+                    if col2.button("✗ No", key=f"cancel_del_ahorro_{idx}"):
+                        st.session_state["confirmar_eliminar_ahorro"] = None
+                        st.rerun()
+                st.markdown("---")
+    
+    # Sección de Metas
+    st.markdown("### 🎯 Metas de Ahorro")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("➕ Nueva Meta"):
+            st.session_state["mostrar_form_meta"] = True
+            st.session_state["editar_meta"] = None
+    
+    # Formulario para añadir/editar meta
+    if st.session_state["mostrar_form_meta"] or st.session_state["editar_meta"] is not None:
+        with st.form("formulario_meta"):
+            editar_modo = st.session_state["editar_meta"] is not None
+            if editar_modo:
+                meta = df_metas.iloc[st.session_state["editar_meta"]]
+                st.markdown("#### ✏️ Editar Meta")
+            else:
+                st.markdown("#### ➕ Nueva Meta")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                nombre_meta = st.text_input(
+                    "Nombre de la Meta",
+                    value=meta["nombre_objetivo"] if editar_modo else ""
+                )
+                meta_total = st.number_input(
+                    "Monto Objetivo",
+                    value=int(meta["meta_total"]) if editar_modo else 0,
+                    step=1000,
+                    min_value=0
+                )
+            with col2:
+                fecha_meta = st.date_input(
+                    "Fecha Objetivo",
+                    value=meta["fecha_meta"].date() if editar_modo else datetime.today()
+                )
+                descripcion_meta = st.text_input(
+                    "Descripción de la Meta",
+                    value=meta["descripcion"] if editar_modo else ""
+                )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit = st.form_submit_button("💾 Guardar")
+            with col2:
+                cancel = st.form_submit_button("❌ Cancelar")
+            
+            if submit:
+                if editar_modo:
+                    if actualizar_meta(st.session_state["editar_meta"], nombre_meta, meta_total, fecha_meta, descripcion_meta):
+                        st.success("✅ Meta actualizada correctamente")
+                        st.session_state["editar_meta"] = None
+                        df_metas = cargar_metas()
+                        st.rerun()
+                else:
+                    if guardar_meta(nombre_meta, meta_total, fecha_meta, descripcion_meta):
+                        st.success("✅ Meta guardada correctamente")
+                        st.session_state["mostrar_form_meta"] = False
+                        df_metas = cargar_metas()
+                        st.rerun()
+            
+            if cancel:
+                st.session_state["mostrar_form_meta"] = False
+                st.session_state["editar_meta"] = None
+                st.rerun()
+    
+    # Mostrar metas existentes
+    if not df_metas.empty:
+        st.markdown("#### Metas Actuales")
+        for idx, meta in df_metas.iterrows():
+            with st.container():
+                col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1, 1])
+                with col1:
+                    st.markdown(f"**{meta['nombre_objetivo']}**")
+                    st.write(meta['descripcion'])
+                with col2:
+                    st.metric("Objetivo", fmt(meta['meta_total']))
+                    st.write(f"Fecha: {meta['fecha_meta'].strftime('%Y-%m-%d')}")
+                with col3:
+                    # Calcular progreso basado en ahorros totales
+                    progreso = min(100, (total_ahorrado / meta['meta_total']) * 100)
+                    st.progress(progreso / 100)
+                    st.write(f"Progreso: {progreso:.1f}%")
+                
+                # Botones de editar y eliminar
+                with col4:
+                    if st.button("✏️", key=f"edit_meta_{idx}"):
+                        st.session_state["editar_meta"] = idx
+                        st.session_state["mostrar_form_meta"] = False
+                        st.rerun()
+                
+                with col5:
+                    if st.button("🗑️", key=f"del_meta_{idx}"):
+                        st.session_state["confirmar_eliminar_meta"] = idx
+                        st.rerun()
+                
+                # Confirmación de eliminación
+                if st.session_state["confirmar_eliminar_meta"] == idx:
+                    st.warning("⚠️ ¿Estás seguro de eliminar esta meta?")
+                    col1, col2 = st.columns(2)
+                    if col1.button("✓ Sí", key=f"confirm_del_meta_{idx}"):
+                        eliminar_meta(idx)
+                        st.session_state["confirmar_eliminar_meta"] = None
+                        df_metas = cargar_metas()
+                        st.rerun()
+                    if col2.button("✗ No", key=f"cancel_del_meta_{idx}"):
+                        st.session_state["confirmar_eliminar_meta"] = None
+                        st.rerun()
+                st.markdown("---")
